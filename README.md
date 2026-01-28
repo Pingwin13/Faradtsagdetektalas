@@ -1,4 +1,4 @@
-# Faradsagdetektalas
+# Faradtsagdetektalas
 
 Ez a Python nyelven írt alkalmazás egy MediaPipe Face Mesh-en alapuló fáradtságdetektáló alkalmazás, amely webkamerán keresztül valós időben detektálja a fáradtság jeleit.( ásítás, pislogás szám, szem állapota, fej pozíciója)
 
