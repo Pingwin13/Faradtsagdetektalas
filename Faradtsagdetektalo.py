@@ -3,6 +3,7 @@ import mediapipe as mp
 import math
 import numpy as np
 import time
+import winsound
 from collections import deque
 
 # Beallitasok es Fuggvenyek
@@ -27,7 +28,7 @@ def mouth_aspect_ratio(landmarks):
     return vertical / horizontal
 
 
-def get_euler_angles(rvec, tvec, camera_matrix, dist_coeffs):
+def get_euler_angles(rvec, tvec):
     rmat, _ = cv2.Rodrigues(rvec)
     sy = math.sqrt(rmat[0, 0] * rmat[0, 0] + rmat[1, 0] * rmat[1, 0])
     singular = sy < 1e-6
@@ -40,6 +41,14 @@ def get_euler_angles(rvec, tvec, camera_matrix, dist_coeffs):
         y = math.atan2(-rmat[2, 0], sy)
         z = 0
     return np.degrees(x), np.degrees(y), np.degrees(z)
+
+
+# Seged fuggveny arc kozephez
+def get_face_center(landmarks):
+    xs = [pt[0] for pt in landmarks]
+    ys = [pt[1] for pt in landmarks]
+    return int(sum(xs) / len(xs)), int(sum(ys) / len(ys))
+
 
 # Landmark Indexek
 
@@ -56,8 +65,6 @@ FACE_OUTLINE = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361,
                 103, 67, 109]
 MOUTH_OUTER = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308]
 MOUTH_INNER = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308]
-UPPER_LIP_OUTER = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291]
-UPPER_LIP_INNER = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308]
 
 # Parameterek
 
@@ -73,7 +80,8 @@ EAR_THRESHOLD = 0.31  # Amennyiben nem sikerul kalibralni ez az alapertek.
 
 #Szem idozites
 eye_closed_frame_counter = 0
-EYE_CLOSED_FRAMES_THRESHOLD = 3
+EYE_CLOSED_FRAMES_THRESHOLD = 5
+MICROSLEEP_FRAMES = 45
 
 # Pislogas szamlalo valtozok
 blink_count = 0
@@ -81,9 +89,9 @@ blink_ready = True
 start_time = time.time()
 blinks_per_minute = 0
 
+# DIST & posture thresholds
 DIST_THRESHOLD = 200
-PITCH_DROP_THRESHOLD = -15
-ROLL_SLUMP_THRESHOLD = 20
+FACE_LOST_THRESHOLD = 220
 MAR_THRESHOLD = 0.6
 YAWN_FRAMES_THRESHOLD = 20
 yawn_frame_counter = 0
@@ -99,12 +107,12 @@ while True:
 
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(rgb)
-
     h, w, _ = frame.shape
 
     #Kalibracios uzenet
     if not is_calibrated:
-        cv2.putText(frame, "KERLEK NEZZ A KAMERABA!", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        cv2.putText(frame, "KERLEK NEZZ A KAMERABA!", (30, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
         cv2.putText(frame, f"Kalibracio... {int((calibration_frames / MAX_CALIBRATION_FRAMES) * 100)}%", (30, 90),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         cv2.rectangle(frame, (w // 2 - 100, h // 2 - 120), (w // 2 + 100, h // 2 + 120), (255, 255, 255), 2)
@@ -118,20 +126,21 @@ while True:
             right_ear_val = eye_aspect_ratio_3d(landmarks, RIGHT_EYE)
             avg_ear = (left_ear_val + right_ear_val) / 2.0
 
-            # Fejtartas és korrekcio kiszamitasa
+            # Fejtartas kiszamitasa
             image_points = np.array([(landmarks[i][0], landmarks[i][1]) for i in PNP_IMAGE_POINTS_IDX], dtype="double")
             focal_length = w
             center = (w / 2, h / 2)
-            camera_matrix = np.array([[focal_length, 0, center[0]], [0, focal_length, center[1]], [0, 0, 1]],
-                                     dtype="double")
+            camera_matrix = np.array([[focal_length, 0, center[0]],
+                                      [0, focal_length, center[1]],
+                                      [0, 0, 1]], dtype="double")
             dist_coeffs = np.zeros((4, 1))
             success, rvec, tvec = cv2.solvePnP(PNP_MODEL_POINTS, image_points, camera_matrix, dist_coeffs,
                                                flags=cv2.SOLVEPNP_ITERATIVE)
-
             yaw_angle, pitch_angle, roll_angle = 0, 0, 0
             if success:
-                pitch_angle, yaw_angle, roll_angle = get_euler_angles(rvec, tvec, camera_matrix, dist_coeffs)
+                pitch_angle, yaw_angle, roll_angle = get_euler_angles(rvec, tvec)
 
+            # EAR korrekcio fejmozgashoz
             correction = 1.0 - (abs(yaw_angle) / 90) * 0.35
             corrected_ear = avg_ear / correction
 
@@ -143,6 +152,7 @@ while True:
             else:
                 blink_ready = True
 
+            # BPM
             elapsed_time = time.time() - start_time
             if elapsed_time > 0:
                 blinks_per_minute = (blink_count / elapsed_time) * 60
@@ -150,7 +160,7 @@ while True:
                 start_time = time.time()
                 blink_count = 0
 
-            # Kalibracio vagy Detektalas
+            # Kalibracio
             if not is_calibrated:
                 calibration_frames += 1
                 calibration_ear_values.append(corrected_ear)
@@ -158,88 +168,85 @@ while True:
                     avg_open_eye = sum(calibration_ear_values) / len(calibration_ear_values)
                     EAR_THRESHOLD = avg_open_eye * 0.75
                     is_calibrated = True
-                    x_coords = [pt[0] for pt in landmarks]
-                    y_coords = [pt[1] for pt in landmarks]
-                    locked_face_center = (int(sum(x_coords) / len(x_coords)), int(sum(y_coords) / len(y_coords)))
+                    locked_face_center = get_face_center(landmarks)
+                continue
+
+            # Arckovetes
+            face_center = get_face_center(landmarks)
+            if locked_face_center is None:
+                locked_face_center = face_center
+            dist = math.hypot(face_center[0] - locked_face_center[0], face_center[1] - locked_face_center[1])
+
+            # Mindig frissul EAR history
+            ear_history.append(corrected_ear)
+            smoothed_ear = sum(ear_history) / len(ear_history)
+
+            # Fatigue logika
+            if dist > FACE_LOST_THRESHOLD:
+                fatigue_status = "ARC NINCS POZICIOBAN"
+                fatigue_color = (128, 128, 128)
+                eye_closed_frame_counter = 0
+                yawn_frame_counter = 0
             else:
-                # Arckovetés és Faradtsag logika
-                x_coords = [pt[0] for pt in landmarks]
-                y_coords = [pt[1] for pt in landmarks]
-                face_center = (int(sum(x_coords) / len(x_coords)), int(sum(y_coords) / len(y_coords)))
-                if locked_face_center is None: locked_face_center = face_center
-                dist = math.hypot(face_center[0] - locked_face_center[0], face_center[1] - locked_face_center[1])
+                if smoothed_ear < EAR_THRESHOLD:
+                    eye_closed_frame_counter += 1
+                else:
+                    eye_closed_frame_counter = 0
 
-                if dist < DIST_THRESHOLD:
-                    ear_history.append(corrected_ear)
-                    smoothed_ear = sum(ear_history) / len(ear_history)
+                fatigue_status = "Eber"
+                fatigue_color = (0, 255, 0)
+                eye_status = "Nyitva"
+                eye_color = (0, 255, 0)
 
-                    fatigue_status = "Eber"
-                    fatigue_color = (0, 255, 0)
+                if eye_closed_frame_counter >= MICROSLEEP_FRAMES:
+                    fatigue_status = "MICROSLEEP!"
+                    fatigue_color = (0, 0, 255)
+                    eye_status = "Csukva"
+                    eye_color = (0, 0, 255)
+                    winsound.Beep(2000, 600)
+                elif eye_closed_frame_counter > EYE_CLOSED_FRAMES_THRESHOLD:
+                    fatigue_status = "Szem csukva"
+                    fatigue_color = (0, 0, 255)
+                    eye_status = "Csukva"
+                    eye_color = (0, 0, 255)
+                else:
+                    # BPM es asitas csak eber allapotban
+                    if blinks_per_minute > 40:
+                        fatigue_status = "Szemfaradtsag (Magas BPM)"
+                        fatigue_color = (0, 165, 255)
 
-                    # Prioritasi sorrend: Szem csukva > Magas BPM > Asitas
-                    if smoothed_ear < EAR_THRESHOLD:
-                        eye_closed_frame_counter += 1
+                    mar = mouth_aspect_ratio(landmarks)
+                    if mar > MAR_THRESHOLD:
+                        yawn_frame_counter += 1
                     else:
-                        eye_closed_frame_counter = 0
+                        yawn_frame_counter = 0
 
-                    if eye_closed_frame_counter > EYE_CLOSED_FRAMES_THRESHOLD:
-                        eye_status = "Csukva"
-                        eye_color = (0, 0, 255)
-                        if pitch_angle < PITCH_DROP_THRESHOLD:
-                            fatigue_status = "Bolinto fej"
-                        elif abs(roll_angle) > ROLL_SLUMP_THRESHOLD:
-                            fatigue_status = "Oldalra dolt fej"
-                        else:
-                            fatigue_status = "ALVAS VESZELY!"
+                    if yawn_frame_counter > YAWN_FRAMES_THRESHOLD:
+                        fatigue_status = "Asitas"
                         fatigue_color = (0, 0, 255)
-                    else:
-                        eye_status = "Nyitva"
-                        eye_color = (0, 255, 0)
 
-                        # Ha nyitva a szem, de suru pislogas
-                        if blinks_per_minute > 40:
-                            fatigue_status = "Szemfaradtsag (Magas BPM)"
-                            fatigue_color = (0, 165, 255)
+            # Kiirasok
+            cv2.putText(frame, fatigue_status, (30, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, fatigue_color, 2)
+            cv2.putText(frame, f"Szem: {eye_status}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, eye_color, 2)
+            cv2.putText(frame, f"EAR: {smoothed_ear:.2f} (Lim: {EAR_THRESHOLD:.2f})", (30, 80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+            cv2.putText(frame, f"Pislogas: {blink_count}", (w - 200, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                        (255, 255, 255), 2)
+            cv2.putText(frame, f"BPM: {int(blinks_per_minute)}", (w - 200, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                        (255, 255, 255), 2)
 
-                        mar = mouth_aspect_ratio(landmarks)
-                        if mar > MAR_THRESHOLD:
-                            yawn_frame_counter += 1
-                        else:
-                            yawn_frame_counter = 0
+            # Kirajzolasok
+            face_outline_pts = [(int(landmarks[i][0]), int(landmarks[i][1])) for i in FACE_OUTLINE]
+            cv2.polylines(frame, [np.array(face_outline_pts)], True, (255, 255, 0), 1)
 
-                        if yawn_frame_counter > YAWN_FRAMES_THRESHOLD and fatigue_status == "Eber":
-                            fatigue_status = "Asitas"
-                            fatigue_color = (0, 0, 255)
+            mouth_outer_pts = [(int(landmarks[i][0]), int(landmarks[i][1])) for i in MOUTH_OUTER]
+            mouth_inner_pts = [(int(landmarks[i][0]), int(landmarks[i][1])) for i in MOUTH_INNER]
+            cv2.polylines(frame, [np.array(mouth_outer_pts)], True, (0, 200, 200), 1)
+            cv2.polylines(frame, [np.array(mouth_inner_pts)], True, (0, 200, 200), 1)
 
-                    # Kiirasok
-                    cv2.putText(frame, fatigue_status, (30, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, fatigue_color, 2)
-                    cv2.putText(frame, f"Szem: {eye_status}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, eye_color, 2)
-
-                    cv2.putText(frame, f"EAR: {smoothed_ear:.2f} (Lim: {EAR_THRESHOLD:.2f})", (30, 80),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-
-                    cv2.putText(frame, f"Pislogas: {blink_count}", (w - 200, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                                (255, 255, 255), 2)
-                    cv2.putText(frame, f"BPM: {int(blinks_per_minute)}", (w - 200, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                                (255, 255, 255), 2)
-
-                    # Kirajzolasok
-                    face_outline_pts = [(int(landmarks[i][0]), int(landmarks[i][1])) for i in FACE_OUTLINE]
-                    cv2.polylines(frame, [np.array(face_outline_pts)], True, (255, 255, 0), 1)
-
-                    mouth_outer_pts = [(int(landmarks[i][0]), int(landmarks[i][1])) for i in MOUTH_OUTER]
-                    mouth_inner_pts = [(int(landmarks[i][0]), int(landmarks[i][1])) for i in MOUTH_INNER]
-                    cv2.polylines(frame, [np.array(mouth_outer_pts)], True, (0, 200, 200), 1)
-                    cv2.polylines(frame, [np.array(mouth_inner_pts)], True, (0, 200, 200), 1)
-
-                    upper_outer_pts = [(int(landmarks[i][0]), int(landmarks[i][1])) for i in UPPER_LIP_OUTER]
-                    upper_inner_pts = [(int(landmarks[i][0]), int(landmarks[i][1])) for i in UPPER_LIP_INNER]
-                    cv2.polylines(frame, [np.array(upper_outer_pts)], False, (0, 200, 200), 1)
-                    cv2.polylines(frame, [np.array(upper_inner_pts)], False, (0, 200, 200), 1)
-
-                    for idx in LEFT_EYE + RIGHT_EYE:
-                        x, y, _ = landmarks[idx]
-                        cv2.circle(frame, (int(x), int(y)), 2, eye_color, -1)
+            for idx in LEFT_EYE + RIGHT_EYE:
+                x, y, _ = landmarks[idx]
+                cv2.circle(frame, (int(x), int(y)), 2, eye_color, -1)
 
     cv2.imshow("Fáradtság Detektálás", frame)
     if cv2.waitKey(30) & 0xFF == 27:
