@@ -5,12 +5,26 @@ import numpy as np
 import time
 import winsound
 from collections import deque
+import threading
+import json
+from datetime import datetime
+
+# Naplozasi beallitasok
+log_filename = "faradtsagnaplo.json"
+last_logged_status = None
+log_data = []
+
+def save_to_json(data):
+    with open(log_filename, 'w', encoding= 'utf-8') as f:
+        json.dump(data, f)
 
 # Beallitasok es Fuggvenyek
 
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(max_num_faces=1, refine_landmarks=True)
 
+def play_alarm():
+    winsound.Beep(2000,600)
 
 def distance_3d(p1, p2):
     return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2 + (p1[2] - p2[2]) ** 2)
@@ -80,7 +94,7 @@ EAR_THRESHOLD = 0.31  # Amennyiben nem sikerul kalibralni ez az alapertek.
 
 #Szem idozites
 eye_closed_frame_counter = 0
-EYE_CLOSED_FRAMES_THRESHOLD = 5
+EYE_CLOSED_FRAMES_THRESHOLD = 20
 MICROSLEEP_FRAMES = 45
 
 # Pislogas szamlalo valtozok
@@ -203,7 +217,12 @@ while True:
                     fatigue_color = (0, 0, 255)
                     eye_status = "Csukva"
                     eye_color = (0, 0, 255)
-                    winsound.Beep(2000, 600)
+
+                    alarm_active = any(t.name == "alarm_thread" for t in threading.enumerate())
+
+                    if not alarm_active:
+                        threading.Thread(target=play_alarm, name="alarm_thread", daemon=True).start()
+
                 elif eye_closed_frame_counter > EYE_CLOSED_FRAMES_THRESHOLD:
                     fatigue_status = "Szem csukva"
                     fatigue_color = (0, 0, 255)
@@ -224,6 +243,19 @@ while True:
                     if yawn_frame_counter > YAWN_FRAMES_THRESHOLD:
                         fatigue_status = "Asitas"
                         fatigue_color = (0, 0, 255)
+            if fatigue_status != last_logged_status:
+                status = ["Szem csukva", "MICROSLEEP!", "Asitas", "Szemfaradtsag (Magas BPM)"]
+                if fatigue_status in status or (fatigue_status == "Eber" and last_logged_status in status):
+                    event = {
+                        "DateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "Status": fatigue_status,
+                        "Eye": round(float(smoothed_ear), 2),
+                    }
+                    log_data.append(event)
+                    save_to_json(log_data)
+
+                last_logged_status = fatigue_status
+
 
             # Kiirasok
             cv2.putText(frame, fatigue_status, (30, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, fatigue_color, 2)
