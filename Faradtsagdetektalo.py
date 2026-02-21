@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 
 # Naplozasi beallitasok
-log_filename = "faradtsagnaplo.json"
+log_filename = "Vizuális adatok/faradtsagnaplo.json"
 last_logged_status = None
 log_data = []
 
