@@ -94,8 +94,9 @@ EAR_THRESHOLD = 0.31  # Amennyiben nem sikerul kalibralni ez az alapertek.
 
 #Szem idozites
 eye_closed_frame_counter = 0
-EYE_CLOSED_FRAMES_THRESHOLD = 20
+EYE_CLOSED_FRAMES_THRESHOLD = 15
 MICROSLEEP_FRAMES = 45
+Sleep_Frames = 450
 
 # Pislogas szamlalo valtozok
 blink_count = 0
@@ -103,9 +104,11 @@ blink_ready = True
 start_time = time.time()
 blinks_per_minute = 0
 
-# DIST & posture thresholds
+# Arcpozició thresholdok
 DIST_THRESHOLD = 200
 FACE_LOST_THRESHOLD = 220
+
+# Ásítás thresholdok és számláló
 MAR_THRESHOLD = 0.6
 YAWN_FRAMES_THRESHOLD = 20
 yawn_frame_counter = 0
@@ -126,9 +129,9 @@ while True:
     #Kalibracios uzenet
     if not is_calibrated:
         cv2.putText(frame, "KERLEK NEZZ A KAMERABA!", (30, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,0), 2)
         cv2.putText(frame, f"Kalibracio... {int((calibration_frames / MAX_CALIBRATION_FRAMES) * 100)}%", (30, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,0), 2)
         cv2.rectangle(frame, (w // 2 - 100, h // 2 - 120), (w // 2 + 100, h // 2 + 120), (255, 255, 255), 2)
 
     if results.multi_face_landmarks:
@@ -191,7 +194,7 @@ while True:
                 locked_face_center = face_center
             dist = math.hypot(face_center[0] - locked_face_center[0], face_center[1] - locked_face_center[1])
 
-            # Mindig frissul EAR history
+            # Mindig frissulo EAR history
             ear_history.append(corrected_ear)
             smoothed_ear = sum(ear_history) / len(ear_history)
 
@@ -212,8 +215,8 @@ while True:
                 eye_status = "Nyitva"
                 eye_color = (0, 255, 0)
 
-                if eye_closed_frame_counter >= MICROSLEEP_FRAMES:
-                    fatigue_status = "MICROSLEEP!"
+                if eye_closed_frame_counter > Sleep_Frames:
+                    fatigue_status = "Alvas veszely!"
                     fatigue_color = (0, 0, 255)
                     eye_status = "Csukva"
                     eye_color = (0, 0, 255)
@@ -223,15 +226,29 @@ while True:
                     if not alarm_active:
                         threading.Thread(target=play_alarm, name="alarm_thread", daemon=True).start()
 
-                elif eye_closed_frame_counter > EYE_CLOSED_FRAMES_THRESHOLD:
-                    fatigue_status = "Szem csukva"
+
+                elif eye_closed_frame_counter >= MICROSLEEP_FRAMES:
+                    fatigue_status = "Mikroalvas!"
                     fatigue_color = (0, 0, 255)
                     eye_status = "Csukva"
                     eye_color = (0, 0, 255)
+
+                    alarm_active = any(t.name == "alarm_thread" for t in threading.enumerate())
+
+                    if not alarm_active:
+                        threading.Thread(target=play_alarm, name="alarm_thread", daemon=True).start()
+
+
+                elif eye_closed_frame_counter > EYE_CLOSED_FRAMES_THRESHOLD:
+                    fatigue_status = "Hosszu pislogas"
+                    fatigue_color = (0, 0, 255)
+                    eye_status = "Csukva"
+                    eye_color = (0, 0, 255)
+
                 else:
                     # BPM es asitas csak eber allapotban
                     if blinks_per_minute > 40:
-                        fatigue_status = "Szemfaradtsag (Magas BPM)"
+                        fatigue_status = "Faradtsag veszely! (Magas BPM)"
                         fatigue_color = (0, 165, 255)
 
                     mar = mouth_aspect_ratio(landmarks)
@@ -261,11 +278,12 @@ while True:
             cv2.putText(frame, fatigue_status, (30, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, fatigue_color, 2)
             cv2.putText(frame, f"Szem: {eye_status}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, eye_color, 2)
             cv2.putText(frame, f"EAR: {smoothed_ear:.2f} (Lim: {EAR_THRESHOLD:.2f})", (30, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 1)
             cv2.putText(frame, f"Pislogas: {blink_count}", (w - 200, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                        (255, 255, 255), 2)
+                        (0,0,0), 2)
             cv2.putText(frame, f"BPM: {int(blinks_per_minute)}", (w - 200, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                        (255, 255, 255), 2)
+                        (0,0,0), 2)
+            cv2.putText(frame,f"Time: {datetime.now()}", (30,450), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 2)
 
             # Kirajzolasok
             face_outline_pts = [(int(landmarks[i][0]), int(landmarks[i][1])) for i in FACE_OUTLINE]
