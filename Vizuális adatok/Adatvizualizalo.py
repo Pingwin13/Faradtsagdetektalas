@@ -2,7 +2,7 @@ import json
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from datetime import datetime
+import numpy as np
 
 def statisztikageneralo(fajlnev='faradtsagnaplo.json'):
     try:
@@ -18,18 +18,21 @@ def statisztikageneralo(fajlnev='faradtsagnaplo.json'):
 
         plt.figure(figsize = (12,8))
 
-        plt.plot(tablazat['DateTime'], tablazat['Eye'], label ='EAR (Szemnyitottság)', color = 'blue', alpha=0.6, linewidth=2)
+        plt.plot(tablazat['DateTime'], tablazat['EAR'], label ='EAR', color = 'blue', alpha=0.6, linewidth=2)
 
         for i, row in tablazat.iterrows():
-            if row['Status'] == "MICROSLEEP!":
-                plt.axvline(x=row['DateTime'], color='red', linestyle='--', alpha=0.7,
-                            label='Microsleep' if 'Microsleep' not in plt.gca().get_legend_handles_labels()[1] else "")
-            elif row['Status'] == "Asitas":
-                plt.scatter(row['DateTime'], row['Eye'], color='orange', s=100,
-                        label='Ásítás' if 'Ásítás' not in plt.gca().get_legend_handles_labels()[1] else "")
-            elif row['Status'] == "Szemfaradtsag (Magas BPM)":
-                plt.scatter(row['DateTime'], row['Eye'], color='purple', marker='x',
-                        label='Magas BPM' if 'Magas BPM' not in plt.gca().get_legend_handles_labels()[1] else "")
+            if row['Status'] == "Microsleep!":
+                plt.axvline(x=row['DateTime'], color='orange', linestyle='--', alpha=0.7,
+                            label='Microsleep!' if 'Microsleep!' not in plt.gca().get_legend_handles_labels()[1] else "")
+            elif row['Status'] == "Yawn":
+                plt.scatter(row['DateTime'], row['EAR'], color='orange', s=100,
+                        label='Yawn' if 'Yawn' not in plt.gca().get_legend_handles_labels()[1] else "")
+            elif row['Status'] == "High BPM!":
+                plt.scatter(row['DateTime'], row['EAR'], color='orange', marker='x',
+                        label='High BPM!' if 'High BPM!' not in plt.gca().get_legend_handles_labels()[1] else "")
+            elif row['Status'] == "Sleep!":
+                plt.scatter(row['DateTime'], row['EAR'], color='red', linestyle='--', alpha=1,
+                        label='Sleep!' if 'Sleep!' not in plt.gca().get_legend_handles_labels()[1] else "")
 
         plt.title('Éberségi Statisztika az Idő Függvényében', fontsize=14)
         plt.xlabel('Időpont')
