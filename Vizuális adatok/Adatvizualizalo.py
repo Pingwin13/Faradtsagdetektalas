@@ -21,24 +21,24 @@ def statisztikageneralo(fajlnev='faradtsagnaplo.json'):
         plt.plot(tablazat['DateTime'], tablazat['EAR'], label ='EAR', color = 'blue', alpha=0.6, linewidth=2)
 
         for i, row in tablazat.iterrows():
-            if row['Status'] == "Microsleep!":
+            if row['Status'] == "Microsleep":
                 plt.axvline(x=row['DateTime'], color='orange', linestyle='--', alpha=0.7,
-                            label='Microsleep!' if 'Microsleep!' not in plt.gca().get_legend_handles_labels()[1] else "")
+                            label='Microsleep' if 'Microsleep' not in plt.gca().get_legend_handles_labels()[1] else "")
             elif row['Status'] == "Yawn":
                 plt.scatter(row['DateTime'], row['EAR'], color='orange', s=100,
                         label='Yawn' if 'Yawn' not in plt.gca().get_legend_handles_labels()[1] else "")
             elif row['Status'] == "High BPM!":
                 plt.scatter(row['DateTime'], row['EAR'], color='orange', marker='x',
-                        label='High BPM!' if 'High BPM!' not in plt.gca().get_legend_handles_labels()[1] else "")
-            elif row['Status'] == "Sleep!":
+                        label='High BPM' if 'High BPM' not in plt.gca().get_legend_handles_labels()[1] else "")
+            elif row['Status'] == "Sleep":
                 plt.scatter(row['DateTime'], row['EAR'], color='red', linestyle='--', alpha=1,
-                        label='Sleep!' if 'Sleep!' not in plt.gca().get_legend_handles_labels()[1] else "")
+                        label='Sleep' if 'Sleep' not in plt.gca().get_legend_handles_labels()[1] else "")
 
         plt.title('Éberségi Statisztika az Idő Függvényében', fontsize=14)
-        plt.xlabel('Időpont')
-        plt.ylabel('EAR Érték')
+        plt.xlabel('Time')
+        plt.ylabel('EAR')
 
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('"%Y-%m-%d %H:%M:%S"'))
         plt.gcf().autofmt_xdate()
 
         plt.legend(loc='upper right')

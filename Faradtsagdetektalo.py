@@ -9,39 +9,107 @@ import threading
 import json
 from datetime import datetime
 
-# Naplozasi beallitasok
+# Konfiguráció és naplózás
 log_filename = "Vizuális adatok/faradtsagnaplo.json"
 last_logged_status = None
 log_data = []
 
+# Landmark Indexek ( MediaPipe specifikus)
+Left_eye = [33, 160, 158, 133, 153, 144]
+Right_eye = [362, 385, 387, 263, 373, 380]
+PnP_image_points_idx = [1, 152, 33, 263, 61, 291] # Orr, ál, szemzugok, szájszélek
+PnP_model_points = np.array([
+    (0.0, 0.0, 0.0),            # Orrhegy
+    (0.0, -330.0, -65.0),       # Ál
+    (-225.0, 170.0, -135.0),    # Bal szem bal sarka
+    (225.0, 170.0, -135.0),     # Jobb szem jobb sarka
+    (-150.0, -150.0, -125.0),   # Bal szájszél
+    (150.0, -150.0, -125.0)     # Jobb szájszél
+], dtype="double")
+
+# vizualizációs kontúrok indexei
+Face_outline = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361,
+                288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149,
+                150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54,
+                103, 67, 109]
+Mouth_outer = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308]
+Mouth_inner = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308]
+
+# Kamera beállítási pont, 0 = beépített kamera, 1,2 = USB-n keresztül csatlakoztatott kamera
+cap = cv2.VideoCapture(0)
+# Mozgóátlag a zajszűréshez
+ear_history = deque(maxlen=5)
+
+# Kalibrációs fázis változói
+is_calibrated = False
+calibration_frames = 0
+Max_calibration_frames = 100
+calibration_ear_values = []
+EAR_threshold = 0.31  # Default érték, ha nem sikerül a kalibráció
+calibration_pitch = []
+calibration_yaw = []
+calibration_roll = []
+baseline_pitch = 0.0
+baseline_yaw = 0.0
+baseline_roll = 0.0
+
+eye_closed_frame_counter = 0
+# Időzítési küszöbök a szem csukottsági állapotának megállapításához ( FPS függő)
+Eye_closed_frames = 15  #~0.5 mp 30 FPS-nél
+Microsleep_frames = 90  #~3.0 mp 30 FPS-nél
+Sleep_Frames = 450      #~15 mp 30 FPS-nél
+
+# Statisztikai változók
+blink_count = 0
+blink_ready = True
+start_time = time.time()
+blinks_per_minute = 0
+Face_lost_threshold = 220 #pixeltávolság, ami után elveszettnek tekintjük az arcot
+MAR_threshold = 0.5
+Yawn_frames_threshold = 90
+Yawn_frame_counter = 0
+
+# Fej dőlés
+Pitch_threshold = 25
+Yaw_threshold = 30
+Roll_threshold = 20
+Head_tilt_frames = 45
+Head_tilt_frame_counter = 0
+
+locked_face_center = None
+
+# Segédfüggvények
 def save_to_json(data):
     with open(log_filename, 'w', encoding= 'utf-8') as f:
         json.dump(data, f)
 
-# Beallitasok es Fuggvenyek
-
+# MediaPipe Face Mesh inicializálása, finomított landmarkokkal a pontosabb EAR számításhoz
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(max_num_faces=1, refine_landmarks=True)
 
+# Riasztás megszólaltatása külön szálon, hogy ne akassza meg a videófolyamot
 def play_alarm():
     winsound.Beep(2000,600)
 
+# Euklideszi távolság számítása 3D térben
 def distance_3d(p1, p2):
     return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2 + (p1[2] - p2[2]) ** 2)
 
-
+# EAR kiszámítása Soukupova és Cech képlete alapján
+# függőleges távolságok átlaga / vízszintes távolság
 def eye_aspect_ratio_3d(lm_list, eye_indices):
     p = [lm_list[i] for i in eye_indices]
     return (distance_3d(p[1], p[5]) + distance_3d(p[2], p[4])) / (2.0 * distance_3d(p[0], p[3]))
 
-
+# MAR számítása az ásítás detektálásához
 def mouth_aspect_ratio(lm_list):
     vertical = distance_3d(lm_list[13], lm_list[14])
     horizontal = distance_3d(lm_list[61], lm_list[291])
     if horizontal == 0: return 0
     return vertical / horizontal
 
-
+# A rotációs mátrixból kinyeri a fej dőlésszögeit (Pitch, Yaw, Roll)
+# Segít az EAR korrekciójában, ha a felhasználó nem pont a kamerába néz
 def get_euler_angles(rotation_vec, translation_vec):
     rmat, _ = cv2.Rodrigues(rotation_vec)
     singularcheck = math.sqrt(rmat[0, 0] * rmat[0, 0] + rmat[1, 0] * rmat[1, 0])
@@ -59,64 +127,11 @@ def get_euler_angles(rotation_vec, translation_vec):
     face_distance = np.linalg.norm(translation_vec)
     return np.degrees(pitch), np.degrees(yaw), np.degrees(roll), face_distance
 
-
-# Seged fuggveny arc kozephez
+# Az arc mértani középpontjának meghatározása a pozíciókövetéshez
 def get_face_center(lm_list):
     xs = [pt[0] for pt in lm_list]
     ys = [pt[1] for pt in lm_list]
     return int(sum(xs) / len(xs)), int(sum(ys) / len(ys))
-
-
-# Landmark Indexek
-
-Left_eye = [33, 160, 158, 133, 153, 144]
-Right_eye = [362, 385, 387, 263, 373, 380]
-PnP_image_points_idx = [1, 152, 33, 263, 61, 291]
-PnP_model_points = np.array([
-    (0.0, 0.0, 0.0), (0.0, -330.0, -65.0), (-225.0, 170.0, -135.0),
-    (225.0, 170.0, -135.0), (-150.0, -150.0, -125.0), (150.0, -150.0, -125.0)
-], dtype="double")
-Face_outline = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361,
-                288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149,
-                150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54,
-                103, 67, 109]
-Mouth_outer = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308]
-Mouth_inner = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308]
-
-# Parameterek
-
-cap = cv2.VideoCapture(0)
-ear_history = deque(maxlen=5)
-
-#Kalibracios valtozok
-is_calibrated = False
-calibration_frames = 0
-Max_calibration_frames = 100
-calibration_ear_values = []
-EAR_threshold = 0.31  # Amennyiben nem sikerul kalibralni ez az alapertek.
-
-#Szem idozites
-eye_closed_frame_counter = 0
-Eye_closed_frames_threshold = 15
-Microsleep_frames = 45
-Sleep_Frames = 450
-
-# Pislogas szamlalo valtozok
-blink_count = 0
-blink_ready = True
-start_time = time.time()
-blinks_per_minute = 0
-
-# Arcpozició thresholdok
-Dist_threshold = 200
-Face_lost_threshold = 220
-
-# Ásítás thresholdok és számláló
-MAR_threshold = 0.6
-Yawn_frames_threshold = 20
-Yawn_frame_counter = 0
-
-locked_face_center = None
 
 # Fociklus
 
@@ -127,29 +142,35 @@ while True:
 
     eye_status = "Ismeretlen"
     eye_color = (255, 255, 255)
+    rel_pitch = 0.0
+    rel_yaw = 0.0
+    rel_roll = 0.0
+    pitch_angle = 0.0
+    yaw_angle = 0.0
+    roll_angle = 0.0
 
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(rgb)
     h, w, _ = frame.shape
 
-    #Kalibracios uzenet
+    # Kalibrációs instrukciók
     if not is_calibrated:
-        cv2.putText(frame, "KERLEK NEZZ A KAMERABA!", (30, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,0), 2)
-        cv2.putText(frame, f"Kalibracio... {int((calibration_frames / Max_calibration_frames) * 100)}%", (30, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,0), 2)
+        cv2.putText(frame, "Look at the camera!", (30, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
+        cv2.putText(frame, f"Calibration... {int((calibration_frames / Max_calibration_frames) * 100)}%", (30, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
         cv2.rectangle(frame, (w // 2 - 100, h // 2 - 120), (w // 2 + 100, h // 2 + 120), (255, 255, 255), 2)
 
     if results.multi_face_landmarks is not None:
         for face_landmarks in results.multi_face_landmarks:
             landmarks = [(lm.x * w, lm.y * h, lm.z * w) for lm in face_landmarks.landmark]
 
-            # Alap EAR szamitas
+            # EAR és Orientáció számítás
             left_ear_val = eye_aspect_ratio_3d(landmarks, Left_eye)
             right_ear_val = eye_aspect_ratio_3d(landmarks, Right_eye)
             avg_ear = (left_ear_val + right_ear_val) / 2.0
 
-            # Fejtartas kiszamitasa
+            # PnP algoritmus futtatása a fej dőlésszögének meghatározásához
             image_points = np.array([(landmarks[i][0], landmarks[i][1]) for i in PnP_image_points_idx], dtype="double")
             focal_length = w
             center = (w / 2, h / 2)
@@ -163,22 +184,30 @@ while True:
             if success:
                 pitch_angle, yaw_angle, roll_angle, dist = get_euler_angles(rvec, tvec)
 
-            # EAR korrekcio fejmozgashoz
+            # EAR korrekció, ha elfordítjuk a fejünket, a szem perspektivikusan szűkebbnek tűnik.
+            # Ezt egy matematikai korrekcióval kompenzáljuk a téves riasztások elkerülése végett.
             correction = 1.0 - (abs(yaw_angle) / 90) * 0.35
             corrected_ear = avg_ear / correction
 
-            # Kalibracio
+            # Automatizált kalibráció futtatása
             if not is_calibrated:
                 calibration_frames += 1
                 calibration_ear_values.append(corrected_ear)
+                calibration_pitch.append(pitch_angle)
+                calibration_yaw.append(yaw_angle)
+                calibration_roll.append(roll_angle)
+
                 if calibration_frames >= Max_calibration_frames:
                     avg_open_eye = sum(calibration_ear_values) / len(calibration_ear_values)
                     EAR_threshold = avg_open_eye * 0.75
+                    baseline_pitch = sum(calibration_pitch) / len(calibration_pitch)
+                    baseline_yaw = sum(calibration_yaw) / len(calibration_yaw)
+                    baseline_roll = sum(calibration_roll) / len(calibration_roll)
                     is_calibrated = True
                     locked_face_center = get_face_center(landmarks)
                 continue
 
-            # Pislogas szamlalo
+            # Pislogás detektálás (állapotgép alapú: Ready -> Blink -> Reset)
             if corrected_ear < EAR_threshold:
                 if blink_ready:
                     blink_count += 1
@@ -186,7 +215,7 @@ while True:
             else:
                 blink_ready = True
 
-            # BPM
+            # Blinks per minute dinamikus számítása
             elapsed_time = time.time() - start_time
             if elapsed_time > 0:
                 blinks_per_minute = (blink_count / elapsed_time) * 60
@@ -194,19 +223,19 @@ while True:
                 start_time = time.time()
                 blink_count = 0
 
-            # Arckovetes
+            # Arckövetés (távolság az eredeti kalibrált középponthoz képest)
             face_center = get_face_center(landmarks)
             if locked_face_center is None:
                 locked_face_center = face_center
             dist = math.hypot(face_center[0] - locked_face_center[0], face_center[1] - locked_face_center[1])
 
-            # Mindig frissulo EAR history
+            # EAR simítás mozgóátlaggal
             ear_history.append(corrected_ear)
             smoothed_ear = sum(ear_history) / len(ear_history)
 
-            # Fatigue logika
+            # Fáradtság logikai döntési fa
             if dist > Face_lost_threshold:
-                fatigue_status = "ARC NINCS POZICIOBAN"
+                fatigue_status = "Lost face"
                 fatigue_color = (128, 128, 128)
                 eye_closed_frame_counter = 0
                 Yawn_frame_counter = 0
@@ -216,15 +245,26 @@ while True:
                 else:
                     eye_closed_frame_counter = 0
 
-                fatigue_status = "Eber"
+                rel_pitch = pitch_angle - baseline_pitch
+                rel_yaw = yaw_angle - baseline_yaw
+                rel_roll = roll_angle - baseline_roll
+                # Fejdőlés
+                if abs(rel_pitch) > Pitch_threshold or abs(rel_yaw) > Yaw_threshold or abs(rel_roll) > Roll_threshold:
+                    Head_tilt_frame_counter += 1
+                else:
+                    Head_tilt_frame_counter = 0
+
+                # Alapértelmezett állapot
+                fatigue_status = "Awake"
                 fatigue_color = (0, 255, 0)
-                eye_status = "Nyitva"
+                eye_status = "Open"
                 eye_color = (0, 255, 0)
 
+                #Kritikus állapotok ellenőrzése (hierarchikus prioritás)
                 if eye_closed_frame_counter > Sleep_Frames:
-                    fatigue_status = "Sleep!"
+                    fatigue_status = "Sleep"
                     fatigue_color = (0, 0, 255)
-                    eye_status = "Csukva"
+                    eye_status = "Close"
                     eye_color = (0, 0, 255)
 
                     alarm_active = any(t.name == "alarm_thread" for t in threading.enumerate())
@@ -234,9 +274,9 @@ while True:
 
 
                 elif eye_closed_frame_counter >= Microsleep_frames:
-                    fatigue_status = "Microsleep!"
+                    fatigue_status = "Microsleep"
                     fatigue_color = (0, 0, 255)
-                    eye_status = "Csukva"
+                    eye_status = "Close"
                     eye_color = (0, 0, 255)
 
                     alarm_active = any(t.name == "alarm_thread" for t in threading.enumerate())
@@ -244,17 +284,25 @@ while True:
                     if not alarm_active:
                         threading.Thread(target=play_alarm, name="alarm_thread", daemon=True).start()
 
+                elif Head_tilt_frame_counter > Head_tilt_frames:
+                    fatigue_status = "Head tilt"
+                    fatigue_color = (0, 165, 255)
 
-                elif eye_closed_frame_counter > Eye_closed_frames_threshold:
+                    alarm_active = any(t.name == "alarm_thread" for t in threading.enumerate())
+
+                    if not alarm_active:
+                        threading.Thread(target=play_alarm, name="alarm_thread", daemon=True).start()
+
+                elif eye_closed_frame_counter > Eye_closed_frames:
                     fatigue_status = "Blink"
                     fatigue_color = (0, 0, 255)
-                    eye_status = "Csukva"
+                    eye_status = "Close"
                     eye_color = (0, 0, 255)
 
                 else:
-                    # BPM es asitas csak eber allapotban
+                    # Kiegészítő fáradtsági jelek pislogásszám és ásítás
                     if blinks_per_minute > 40:
-                        fatigue_status = "High BPM!"
+                        fatigue_status = "High BPM"
                         fatigue_color = (0, 165, 255)
 
                     mar = mouth_aspect_ratio(landmarks)
@@ -266,8 +314,10 @@ while True:
                     if Yawn_frame_counter > Yawn_frames_threshold:
                         fatigue_status = "Yawn"
                         fatigue_color = (0, 0, 255)
+
+            # Eseményvezérelt naplózás, csak ha az állapot megváltozik
             if fatigue_status != last_logged_status:
-                status = ["Blink", "Microsleep!", "Yawn", "High BPM!", "Sleep!"]
+                status = ["Blink", "Microsleep", "Yawn", "High BPM", "Sleep"]
                 if fatigue_status in status or (fatigue_status == "Eber" and last_logged_status in status):
                     event = {
                         "DateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -279,19 +329,26 @@ while True:
 
                 last_logged_status = fatigue_status
 
-
-            # Kiirasok
+            # Vizuális statisztikai megjelenítés a teszteléshez
             cv2.putText(frame, fatigue_status, (30, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, fatigue_color, 2)
-            cv2.putText(frame, f"Szem: {eye_status}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, eye_color, 2)
+            cv2.putText(frame, f"Eye: {eye_status}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, eye_color, 2)
             cv2.putText(frame, f"EAR: {smoothed_ear:.2f} (Lim: {EAR_threshold:.2f})", (30, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 1)
-            cv2.putText(frame, f"Pislogas: {blink_count}", (w - 200, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                        (0,0,0), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            cv2.putText(frame, f"MAR: {mar:.2f} (Lim: {MAR_threshold:.2f})", (30, 110),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            cv2.putText(frame, f"Blinks: {blink_count}", (w - 200, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                        (0, 255, 255), 2)
             cv2.putText(frame, f"BPM: {int(blinks_per_minute)}", (w - 200, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                        (0,0,0), 2)
-            cv2.putText(frame,f"Time: {datetime.now()}", (30,450), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 2)
+                        (0, 255, 255), 2)
+            cv2.putText(frame, f"Pitch(rel): {rel_pitch:.1f}", (w - 200, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                        (0, 255, 255), 2)
+            cv2.putText(frame, f"Yaw(rel): {rel_yaw:.1f}", (w - 200, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                        (0, 255, 255),2)
+            cv2.putText(frame, f"Roll(rel): {rel_roll:.1f}", (w - 200, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                        (0, 255, 255), 2)
+            cv2.putText(frame,f"Time: {datetime.now()}", (30,450), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
-            # Kirajzolasok
+            # Kontúrok kirajzolása az arcra, vizuális visszajelzés a megfelelő működésről
             face_outline_pts = [(int(landmarks[i][0]), int(landmarks[i][1])) for i in Face_outline]
             cv2.polylines(frame, [np.array(face_outline_pts)], True, (255, 255, 0), 1)
 
@@ -304,8 +361,9 @@ while True:
                 x, y, _ = landmarks[idx]
                 cv2.circle(frame, (int(x), int(y)), 2, eye_color, -1)
 
-    cv2.imshow("Fáradtság Detektálás", frame)
-    if cv2.waitKey(30) & 0xFF == 27:
+    # Megjelenítés és kilépés kezelése
+    cv2.imshow("Fatigue detector ", frame)
+    if cv2.waitKey(30) & 0xFF == 27: #ESC gomb
         break
 
 cap.release()
