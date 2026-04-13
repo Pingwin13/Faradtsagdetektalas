@@ -221,9 +221,12 @@ while True:
                     is_calibrated = True
                     locked_face_center = get_face_center(landmarks)
                 continue
+            # EAR simítás mozgóátlaggal
+            ear_history.append(corrected_ear)
+            smoothed_ear = sum(ear_history) / len(ear_history)
 
             # Pislogás detektálás (állapotgép alapú: Ready -> Blink -> Reset)
-            if corrected_ear < EAR_threshold:
+            if smoothed_ear < EAR_threshold:
                 if blink_ready:
                     blink_count.append(time.time())
                     blink_ready = False
@@ -231,8 +234,8 @@ while True:
                 blink_ready = True
 
             # Blinks per minute dinamikus számítása
-            elapsed_time = time.time()
-            while blink_count and elapsed_time - blink_count[0] > 60:
+            now = time.time()
+            while blink_count and now - blink_count[0] > 60:
                 blink_count.popleft()
             blinks_per_minute = len(blink_count)
 
@@ -241,10 +244,6 @@ while True:
             if locked_face_center is None:
                 locked_face_center = face_center
             dist = math.hypot(face_center[0] - locked_face_center[0], face_center[1] - locked_face_center[1])
-
-            # EAR simítás mozgóátlaggal
-            ear_history.append(corrected_ear)
-            smoothed_ear = sum(ear_history) / len(ear_history)
 
             # Fáradtság logikai döntési fa
             if dist > Face_lost_threshold:
