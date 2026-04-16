@@ -2,58 +2,123 @@ import json
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import numpy as np
 
-def statisztikageneralo(fajlnev='faradtsagnaplo.json'):
+
+def generate_statistics(filename='fatigue_log.json'):
     try:
-        with open(fajlnev, 'r', encoding='utf-8') as f:
-            adatok= json.load(f)
+        with open(filename, 'r', encoding='utf-8') as f:
+            data = json.load(f)
 
-        if not adatok:
-            print("A napló üres!")
+        if not data:
+            print("The log file is empty!")
             return
 
-        tablazat = pd.DataFrame(adatok)
-        tablazat['DateTime'] = pd.to_datetime(tablazat['DateTime'])
+        # JSON-ből Pandas DataFrame-be
+        table = pd.DataFrame(data)
 
-        plt.figure(figsize = (12,8))
+        # Kötelező oszlopok ellenőrzése
+        required_columns = {'DateTime', 'Status', 'EAR'}
+        if not required_columns.issubset(table.columns):
+            print("Error: The JSON file does not contain the required fields (DateTime, Status, EAR).")
+            return
 
-        plt.plot(tablazat['DateTime'], tablazat['EAR'], label ='EAR', color = 'blue', alpha=0.6, linewidth=2)
+        # Dátum konvertálás és rendezés
+        table['DateTime'] = pd.to_datetime(table['DateTime'])
+        table = table.sort_values('DateTime')
 
-        for i, row in tablazat.iterrows():
-            if row['Status'] == "Microsleep":
-                plt.axvline(x=row['DateTime'], color='orange', linestyle='--', alpha=0.7,
-                            label='Microsleep' if 'Microsleep' not in plt.gca().get_legend_handles_labels()[1] else "")
-            elif row['Status'] == "Yawn":
-                plt.scatter(row['DateTime'], row['EAR'], color='orange', s=100,
-                        label='Yawn' if 'Yawn' not in plt.gca().get_legend_handles_labels()[1] else "")
-            elif row['Status'] == "High BPM!":
-                plt.scatter(row['DateTime'], row['EAR'], color='orange', marker='x',
-                        label='High BPM' if 'High BPM' not in plt.gca().get_legend_handles_labels()[1] else "")
-            elif row['Status'] == "Sleep":
-                plt.scatter(row['DateTime'], row['EAR'], color='red', linestyle='--', alpha=1,
-                        label='Sleep' if 'Sleep' not in plt.gca().get_legend_handles_labels()[1] else "")
+        # Ábra létrehozása
+        plt.figure(figsize=(14, 8))
 
-        plt.title('Éberségi Statisztika az Idő Függvényében', fontsize=14)
-        plt.xlabel('Time')
-        plt.ylabel('EAR')
+        # EAR görbe
+        plt.plot(
+            table['DateTime'],
+            table['EAR'],
+            label='EAR',
+            color='blue',
+            alpha=0.75,
+            linewidth=2
+        )
 
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('"%Y-%m-%d %H:%M:%S"'))
+        # Már kirajzolt jelmagyarázat elemek nyilvántartása
+        plotted_labels = set()
+
+        # Események megjelenítése
+        for _, row in table.iterrows():
+            status = row['Status']
+            dt = row['DateTime']
+            ear = row['EAR']
+
+            if status == "Microsleep":
+                label = "Microsleep" if "Microsleep" not in plotted_labels else None
+                plt.axvline(x=dt, color='orange', linestyle='--', alpha=0.8, label=label)
+                plotted_labels.add("Microsleep")
+
+            elif status == "Yawn":
+                label = "Yawn" if "Yawn" not in plotted_labels else None
+                plt.scatter(dt, ear, color='orange', s=100, marker='o', label=label, zorder=5)
+                plotted_labels.add("Yawn")
+
+            elif status == "High BPM":
+                label = "High BPM" if "High BPM" not in plotted_labels else None
+                plt.scatter(dt, ear, color='purple', s=100, marker='x', label=label, zorder=5)
+                plotted_labels.add("High BPM")
+
+            elif status == "Sleep":
+                label = "Sleep" if "Sleep" not in plotted_labels else None
+                plt.axvline(x=dt, color='red', linestyle='-', alpha=0.9, label=label)
+                plotted_labels.add("Sleep")
+
+            elif status == "Awake":
+                label = "Awake" if "Awake" not in plotted_labels else None
+                plt.axvline(x=dt, color='green', linestyle='-', alpha=0.9, label=label)
+                plotted_labels.add("Awake")
+
+            elif status == "Head tilt":
+                label = "Head tilt" if "Head tilt" not in plotted_labels else None
+                plt.scatter(dt, ear, color='red', s=50, marker='.', label=label, alpha=0.7)
+                plotted_labels.add("Head tilt")
+
+            elif status == "Blink":
+                label = "Blink" if "Blink" not in plotted_labels else None
+                plt.scatter(dt, ear, color='green', s=50, marker='x', label=label, alpha=0.7)
+                plotted_labels.add("Blink")
+
+        # Címek és tengelyek
+        plt.title('Alertness Statistics Over Time', fontsize=16)
+        plt.xlabel('Time', fontsize=12)
+        plt.ylabel('EAR Value', fontsize=12)
+
+        # Dátumformázás
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M:%S'))
         plt.gcf().autofmt_xdate()
 
-        plt.legend(loc='upper right')
+        # Rács, legenda, margók
         plt.grid(True, linestyle=':', alpha=0.7)
+        plt.legend(loc='upper right')
         plt.tight_layout()
 
-        plt.savefig('statisztika.png')
-        print("A statisztika elmentve: statisztika.png")
+        # Statisztikai összegzés
+        print("\n--- Summary ---")
+        print(f"Total number of events: {len(table)}")
+        print(f"Average EAR: {table['EAR'].mean():.3f}")
+        print(f"Minimum EAR: {table['EAR'].min():.3f}")
+        print(f"Maximum EAR: {table['EAR'].max():.3f}")
+
+        # Mentés
+        plt.savefig('statistics.png', dpi=300)
+        print("The statistics have been saved as: statistics.png")
+
         plt.show()
 
     except FileNotFoundError:
-        print(f"Hiba: A '{fajlnev}' fájl nem található. Indítsd el előbb a főprogramot!")
+        print(f"Error: The file '{filename}' was not found. Please run the main program first!")
+
+    except json.JSONDecodeError:
+        print(f"Error: The file '{filename}' is corrupted or has an invalid JSON format.")
 
     except Exception as e:
-        print(f"Hiba történt: {e}")
+        print(f"An error occurred: {e}")
+
 
 if __name__ == "__main__":
-        statisztikageneralo()
+    generate_statistics()
