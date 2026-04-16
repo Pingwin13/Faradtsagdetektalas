@@ -16,7 +16,7 @@ def generate_statistics(filename='fatigue_log.json'):
         # JSON-ből Pandas DataFrame-be
         table = pd.DataFrame(data)
 
-        # Kötelező oszlopok ellenőrzése
+        # Kötelező oszlopok ellenőrzése és hibakezelés
         required_columns = {'DateTime', 'Status', 'EAR'}
         if not required_columns.issubset(table.columns):
             print("Error: The JSON file does not contain the required fields (DateTime, Status, EAR).")
