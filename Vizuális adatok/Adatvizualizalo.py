@@ -68,11 +68,6 @@ def generate_statistics(filename='fatigue_log.json'):
                 plt.axvline(x=dt, color='red', linestyle='-', alpha=0.9, label=label)
                 plotted_labels.add("Sleep")
 
-            elif status == "Awake":
-                label = "Awake" if "Awake" not in plotted_labels else None
-                plt.axvline(x=dt, color='green', linestyle='-', alpha=0.9, label=label)
-                plotted_labels.add("Awake")
-
             elif status == "Head tilt":
                 label = "Head tilt" if "Head tilt" not in plotted_labels else None
                 plt.scatter(dt, ear, color='red', s=50, marker='.', label=label, alpha=0.7)

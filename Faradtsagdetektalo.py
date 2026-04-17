@@ -55,19 +55,16 @@ is_calibrated = False
 calibration_frames = 0
 Max_calibration_frames = 100
 calibration_ear_values = []
-EAR_threshold = 0.31  # Default érték, ha nem sikerül a kalibráció
+EAR_threshold = 0.25  # Default érték, ha nem sikerül a kalibráció
 
 eye_closed_frame_counter = 0
 # Időzítési küszöbök a szem csukottsági állapotának megállapításához ( FPS függő)
-Eye_closed_frames = 15  #~0.5 mp 30 FPS-nél
 Microsleep_frames = 90  #~3.0 mp 30 FPS-nél
 Sleep_Frames = 450      #~15 mp 30 FPS-nél
 
 # Statisztikai változók
 blink_count = deque()
 blink_ready = True
-start_time = time.time()
-blinks_per_minute = 0
 mar = 0.0
 MAR_threshold = 0.5
 Yawn_frames_threshold = 60
@@ -75,9 +72,9 @@ Yawn_frame_counter = 0
 
 # Fej dőlés
 Pitch_threshold = 25
-Yaw_threshold = 30
+#Yaw_threshold = 30
 Roll_threshold = 20
-Head_tilt_frames = 90
+Head_tilt_frames = 30
 Head_tilt_frame_counter = 0
 calibration_pitch = []
 calibration_yaw = []
@@ -144,7 +141,7 @@ def get_face_center(lm_list):
     ys = [pt[1] for pt in lm_list]
     return int(sum(xs) / len(xs)), int(sum(ys) / len(ys))
 
-# Fociklus
+# Főciklus
 
 while True:
     live, frame = cap.read()
@@ -226,7 +223,7 @@ while True:
             smoothed_ear = sum(ear_history) / len(ear_history)
 
             # Pislogás detektálás (állapotgép alapú: Ready -> Blink -> Reset)
-            if smoothed_ear < EAR_threshold:
+            if corrected_ear < EAR_threshold:
                 if blink_ready:
                     blink_count.append(time.time())
                     blink_ready = False
@@ -261,7 +258,7 @@ while True:
                 rel_yaw = yaw_angle - baseline_yaw
                 rel_roll = roll_angle - baseline_roll
                 # Fejdőlés
-                if smoothed_ear < EAR_threshold and (abs(rel_pitch) > Pitch_threshold or abs(rel_roll) > Roll_threshold):
+                if corrected_ear < EAR_threshold and (abs(rel_pitch) > Pitch_threshold or abs(rel_roll) > Roll_threshold):
                     Head_tilt_frame_counter += 1
                 else:
                     Head_tilt_frame_counter = 0
@@ -296,7 +293,7 @@ while True:
 
                     trigger_alarm()
 
-                elif eye_closed_frame_counter > Eye_closed_frames:
+                elif corrected_ear < EAR_threshold:
                     fatigue_status = "Blink"
                     fatigue_color = (0, 0, 255)
                     eye_status = "Close"
@@ -320,12 +317,12 @@ while True:
 
             # Eseményvezérelt naplózás, csak ha az állapot megváltozik
             if fatigue_status != last_logged_status:
-                status = ["Head tilt", "Microsleep", "Yawn", "High BPM", "Sleep", "Blink", "Awake"]
+                status = ["Head tilt", "Microsleep", "Yawn", "High BPM", "Sleep", "Blink"]
                 if fatigue_status in status or (fatigue_status == "Awake" and last_logged_status in status):
                     event = {
                         "DateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "Status": fatigue_status,
-                        "EAR": round(float(smoothed_ear), 2),
+                        "EAR": round(float(corrected_ear), 2),
                     }
                     log_data.append(event)
                     save_to_json(log_data)
@@ -335,7 +332,7 @@ while True:
             # Vizuális statisztikai megjelenítés a teszteléshez
             cv2.putText(frame, fatigue_status, (30, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, fatigue_color, 2)
             cv2.putText(frame, f"Eye: {eye_status}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, eye_color, 2)
-            cv2.putText(frame, f"EAR: {smoothed_ear:.2f} (Lim: {EAR_threshold:.2f})", (30, 80),
+            cv2.putText(frame, f"EAR: {corrected_ear:.2f} (Lim: {EAR_threshold:.2f})", (30, 80),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
             cv2.putText(frame, f"MAR: {mar:.2f} (Lim: {MAR_threshold:.2f})", (30, 110),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
