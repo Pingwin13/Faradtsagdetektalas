@@ -74,7 +74,7 @@ Yawn_frame_counter = 0
 # Fej dőlés
 Pitch_threshold = 25
 #Yaw_threshold = 30
-Roll_threshold =
+Roll_threshold = 20
 Head_tilt_frames = 30
 Head_tilt_frame_counter = 0
 calibration_pitch = []
