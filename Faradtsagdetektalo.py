@@ -57,10 +57,11 @@ Max_calibration_frames = 100
 calibration_ear_values = []
 EAR_threshold = 0.25  # Default érték, ha nem sikerül a kalibráció
 
-eye_closed_frame_counter = 0
-# Időzítési küszöbök a szem csukottsági állapotának megállapításához ( FPS függő)
-Microsleep_frames = 90  #~3.0 mp 30 FPS-nél
-Sleep_Frames = 450      #~15 mp 30 FPS-nél
+eye_closed_start_time = None  # Eltárolja az időbélyeget, amikor lecsukódott a szem
+closed_duration = 0.0   #lecsukott szem eltelt idő másodpercben
+# Időzítési küszöbök a szem csukottsági állapotának megállapításához (másodpercben)
+Microsleep_time = 3.0
+Sleep_time = 15.0
 
 # Statisztikai változók
 blink_count = deque()
@@ -73,7 +74,7 @@ Yawn_frame_counter = 0
 # Fej dőlés
 Pitch_threshold = 25
 #Yaw_threshold = 30
-Roll_threshold = 20
+Roll_threshold =
 Head_tilt_frames = 30
 Head_tilt_frame_counter = 0
 calibration_pitch = []
@@ -92,7 +93,7 @@ def save_to_json(data):
 
 # Riasztás megszólaltatása külön szálon, hogy ne akassza meg a videófolyamot
 def play_alarm():
-    winsound.Beep(2000,600)
+    winsound.Beep(3000,600)
 
 def trigger_alarm():
     alarm_active = any(t.name == "alarm_thread" for t in threading.enumerate())
@@ -161,7 +162,7 @@ while True:
     results = face_mesh.process(rgb)
     h, w, _ = frame.shape
     frame_diagonal = math.sqrt(w ** 2 + h ** 2)
-    Face_lost_threshold = frame_diagonal * 0.15
+    Face_lost_threshold = frame_diagonal * 0.30
 
     # Kalibrációs instrukciók
     if not is_calibrated:
@@ -250,15 +251,18 @@ while True:
                 Yawn_frame_counter = 0
             else:
                 if smoothed_ear < EAR_threshold:
-                    eye_closed_frame_counter += 1
+                    if eye_closed_start_time is None:
+                        eye_closed_start_time = time.time()
+                    closed_duration = time.time() - eye_closed_start_time
                 else:
-                    eye_closed_frame_counter = 0
+                    eye_closed_start_time = None
+                    closed_duration = 0.0
 
                 rel_pitch = pitch_angle - baseline_pitch
                 rel_yaw = yaw_angle - baseline_yaw
                 rel_roll = roll_angle - baseline_roll
                 # Fejdőlés
-                if corrected_ear < EAR_threshold and (abs(rel_pitch) > Pitch_threshold or abs(rel_roll) > Roll_threshold):
+                if smoothed_ear < EAR_threshold and (abs(rel_pitch) > Pitch_threshold or abs(rel_roll) > Roll_threshold):
                     Head_tilt_frame_counter += 1
                 else:
                     Head_tilt_frame_counter = 0
@@ -270,7 +274,7 @@ while True:
                 eye_color = (0, 255, 0)
 
                 #Kritikus állapotok ellenőrzése (hierarchikus prioritás)
-                if eye_closed_frame_counter > Sleep_Frames:
+                if closed_duration > Sleep_time:
                     fatigue_status = "Sleep"
                     fatigue_color = (0, 0, 255)
                     eye_status = "Close"
@@ -279,7 +283,7 @@ while True:
                     trigger_alarm()
 
 
-                elif eye_closed_frame_counter >= Microsleep_frames:
+                elif closed_duration>= Microsleep_time:
                     fatigue_status = "Microsleep"
                     fatigue_color = (0, 0, 255)
                     eye_status = "Close"
@@ -330,11 +334,13 @@ while True:
                 last_logged_status = fatigue_status
 
             # Vizuális statisztikai megjelenítés a teszteléshez
-            cv2.putText(frame, fatigue_status, (30, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, fatigue_color, 2)
+            cv2.putText(frame, fatigue_status, (30, 170), cv2.FONT_HERSHEY_SIMPLEX, 1, fatigue_color, 2)
             cv2.putText(frame, f"Eye: {eye_status}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, eye_color, 2)
             cv2.putText(frame, f"EAR: {corrected_ear:.2f} (Lim: {EAR_threshold:.2f})", (30, 80),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-            cv2.putText(frame, f"MAR: {mar:.2f} (Lim: {MAR_threshold:.2f})", (30, 110),
+            cv2.putText(frame, f"CD: {closed_duration:.1f} sec", (30, 110), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                        fatigue_color, 2)
+            cv2.putText(frame, f"MAR: {mar:.2f} (Lim: {MAR_threshold:.2f})", (30, 140),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
             cv2.putText(frame, f"Blinks / min: {len(blink_count)}", (w - 200, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                         (0, 255, 255), 2)
