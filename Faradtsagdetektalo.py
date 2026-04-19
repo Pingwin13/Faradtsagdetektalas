@@ -75,7 +75,7 @@ Yawn_frame_counter = 0
 Pitch_threshold = 25
 #Yaw_threshold = 30
 Roll_threshold = 20
-Head_tilt_frames = 30
+Head_tilt_frames = 90
 Head_tilt_frame_counter = 0
 calibration_pitch = []
 calibration_yaw = []
@@ -247,7 +247,7 @@ while True:
             if dist > Face_lost_threshold:
                 fatigue_status = "Lost face"
                 fatigue_color = (128, 128, 128)
-                eye_closed_frame_counter = 0
+                closed_duration = 0.0
                 Yawn_frame_counter = 0
             else:
                 if smoothed_ear < EAR_threshold:
@@ -262,7 +262,7 @@ while True:
                 rel_yaw = yaw_angle - baseline_yaw
                 rel_roll = roll_angle - baseline_roll
                 # Fejdőlés
-                if smoothed_ear < EAR_threshold and (abs(rel_pitch) > Pitch_threshold or abs(rel_roll) > Roll_threshold):
+                if abs(rel_pitch) > Pitch_threshold or abs(rel_roll) > Roll_threshold:
                     Head_tilt_frame_counter += 1
                 else:
                     Head_tilt_frame_counter = 0
@@ -294,8 +294,6 @@ while True:
                 elif Head_tilt_frame_counter > Head_tilt_frames:
                     fatigue_status = "Head tilt"
                     fatigue_color = (0, 165, 255)
-
-                    trigger_alarm()
 
                 elif corrected_ear < EAR_threshold:
                     fatigue_status = "Blink"
