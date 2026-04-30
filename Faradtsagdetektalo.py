@@ -75,7 +75,7 @@ Yawn_frame_counter = 0
 Pitch_threshold = 25
 #Yaw_threshold = 30
 Roll_threshold = 20
-Head_tilt_frames = 90
+Head_tilt_frames = 50
 Head_tilt_frame_counter = 0
 calibration_pitch = []
 calibration_yaw = []
@@ -212,7 +212,7 @@ while True:
 
                 if calibration_frames >= Max_calibration_frames:
                     avg_open_eye = sum(calibration_ear_values) / len(calibration_ear_values)
-                    EAR_threshold = avg_open_eye * 0.75
+                    EAR_threshold = avg_open_eye * 0.65
                     baseline_pitch = sum(calibration_pitch) / len(calibration_pitch)
                     baseline_yaw = sum(calibration_yaw) / len(calibration_yaw)
                     baseline_roll = sum(calibration_roll) / len(calibration_roll)
