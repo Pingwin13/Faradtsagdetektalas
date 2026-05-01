@@ -282,7 +282,6 @@ while True:
 
                     trigger_alarm()
 
-
                 elif closed_duration>= Microsleep_time:
                     fatigue_status = "Microsleep"
                     fatigue_color = (0, 0, 255)
@@ -348,7 +347,10 @@ while True:
                         (0, 255, 255),2)
             cv2.putText(frame, f"Roll(rel): {rel_roll:.1f}", (w - 200, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
                         (0, 255, 255), 2)
-            cv2.putText(frame,f"Time: {datetime.now()}", (30,450), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+            cv2.putText(frame,f"Time: {datetime.now()}", (30,450), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                        (0, 255, 255), 2)
+            cv2.putText(frame, "C: Recalibrate | ESC: Quit", (30, h - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
             # Kontúrok kirajzolása az arcra, vizuális visszajelzés a megfelelő működésről
             face_outline_pts = [(int(landmarks[i][0]), int(landmarks[i][1])) for i in Face_outline]
@@ -363,9 +365,25 @@ while True:
                 x, y, _ = landmarks[idx]
                 cv2.circle(frame, (int(x), int(y)), 2, eye_color, -1)
 
-    # Megjelenítés és kilépés kezelése
+    # Megjelenítés, újrakalibrálás és kilépés kezelése
     cv2.imshow("Fatigue detector ", frame)
-    if cv2.waitKey(30) & 0xFF == 27: #ESC gomb
+
+    if cv2.waitKey(30) == ord('c'):  # c - kalibráció újraindítása
+        is_calibrated = False
+        calibration_frames = 0
+        calibration_ear_values = []
+        calibration_pitch = []
+        calibration_yaw = []
+        calibration_roll = []
+        baseline_pitch = 0.0
+        baseline_yaw = 0.0
+        baseline_roll = 0.0
+        EAR_threshold = 0.25
+        ear_history.clear()
+        locked_face_center = None
+        last_logged_status = None
+
+    if cv2.waitKey(30) & 0xFF == 27: #ESC gomb - kilépés
         break
 
 cap.release()
