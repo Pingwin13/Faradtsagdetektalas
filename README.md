@@ -1,17 +1,68 @@
-# Faradtsagdetektalas
+# Fáradtságdetektáló rendszer prototípus
 
-Ez a Python nyelven írt alkalmazás egy MediaPipe Face Mesh-en alapuló fáradtságdetektáló alkalmazás, amely webkamerán keresztül valós időben detektálja a fáradtság jeleit.( ásítás, pislogás szám, szem állapota, fej pozíciója)
+Ez a projekt egy valós idejű, számítógépes látáson alapuló proof of concept fáradtságdetektáló rendszer. 
+A script a kamera képét elemezve, a MediaPipe Face Mesh és az OpenCV segítségével figyeli a felhasználó arcát,
+és hangriasztást ad, ha mikroalvás vagy elalvás jeleit észleli. 
+Ezenkívül percenkénti pislogást számlál és ásítást és fejdőlést is detektál.
 
-Funkcionalitás:
-Indításkor a program egy kalibrációt végez a felhasználó egyedi szemfelépítéséről, így egyedi küszöbértékekkel működik. Abban az esetben, ha a kalibráció sikertelen, előre rögzített értékeket használ.
-Valós idejű maszkot rajzol az arcra, és szöveges figyelmeztetéseket és értékeket jelenít meg.
-Az Eye Aspect Ratio (EAR) algoritmus segítségével érzékeli a pislogást és a szem hosszabb ideig tartó lehunyását. 
-A Mouth Aspect Ratio (MAR) mérésével figyeli a száj nyitottságát, és jelzi a gyakori ásítást.
-Head Pose Estimation a 3D-s arcmodell alapján érzékeli, ha a felhasználó feje előrebukik vagy oldalra dől.
-A EAR és a Head Pose Estimation közös értékein alapulva jelzi a képernyőre ( szem csukva van és a fej pozíciója nem normál állapotban van), hogy Alvás veszély áll fenn.
-A pislogás statisztika (BPM) számolja a percenkénti pislogásszámot, amiből következtet a szem fáradtságára.
+# Faradtsagdetektalo.py
+## Fő funkciók:
+- Dinamikus kalibráció (első 100 frame, átlagos szemnyitottság rögzítése, fejtartás változásához szükséges adatok rögzítése, arcközéppont rögzítése)
+- Pislogás (saját kalibrált nyitott szemérték 65%-a alatt) és szemcsukódás figyelés (Alvás állapot 15 mp. után mikroalvás 3 mp. után)
+- Ásítás detektálás (magasabb, mint 0.5-ös MAR érték legalább 60 Frame-en keresztül)
+- Fejdőlés vizsgálat (kalibrációkor rögzített szögekhez képest)
+- Hangriasztás (Microsleep és Sleep állapotoknál)
+- Eseménynaplózás (állapotváltozások rögzítése JSON fájlba, Statusz - időbélyeg - EAR érték) 
 
-Felhasznált technológiák:
-MediaPipe Face Mesh: 468+ pontos 3D-s archáló kinyerése.
-OpenCV: Videófolyam kezelése és képmunkálás.
-NumPy & Math: Matematikai számítások a 3D-s pontok távolságának és a fej dőlésszögének meghatározásához.
+
+## Rendszerkövetelmény:
+### Operációs rendszer: 
+- Windows
+### Hardver:
+- Működő webkamera
+### Python:
+- Python 3.8 vagy újabb verzió
+
+## Szükséges Python könyvtárak:
+pip install opencv-python mediapipe numpy
+( A math, time, collections, threading, json, datetime, os, winsound standard könyvtárak részei)
+
+## Használat:
+### 1. Kamera csatlakoztatása
+### 2. A script futtatása
+### 3. Kalibrációs fázis: 
+- Nézz egyenesen a kamerába, amíg a kalibráció be nem fejeződik
+### 4. Működés: 
+- A kalibráció befejeztével a rendszer elkezdi a valós idejű elemzést, a képernyőn láthatod a különböző adatokat.
+
+### Gombok:
+- C - újrakalibrálás
+
+- ESC - kilépés
+
+## Naplózás:
+A rendszer automatikusan létrehoz egy Vizuális adatok nevű mappát a script futtatási helyén.
+Ebbe a mappába generál egy fatigue_log.json nevű fájlt, amely időbélyeggel rögzíti a státuszváltozásokat és az abban a pillanatban mért EAR értéket.
+
+
+# Adatvizualizalo.py
+
+## Fő funkciók:
+- EAR görbe kirajzolása
+- Események vizualizációja
+- Interaktív grafikon megjelenítés
+- Szöveges összegzés a konzolon
+- Automatikus mentés
+
+## Szükséges csomagok:
+pip install pandas matplotlib
+
+Miután a Faradtsagdetektalo.py-t lefuttattad és különböző státuszok rögzültek a JSON fájlba, indítsd el az Adatvizualizalo.py-t.
+(Győződj meg róla, hogy abban a mappában fut, ahonnan eléri a fatigue_log.json fájlt!)
+
+
+# Fontos megjegyzések:
+- ### A hangriasztás csak windowson működik
+- ### A rendszer ideális fényviszonyok és frontális vagy kissé elfordított arcra van optimalizálva és tesztelve
+- ### Több kamera esetén a cap = cv2.VideoCapture(0) sorba az értéket módosítsd 1-re vagy 2-re
+

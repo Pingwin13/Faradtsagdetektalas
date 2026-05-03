@@ -314,7 +314,7 @@ while True:
 
                     if Yawn_frame_counter > Yawn_frames_threshold:
                         fatigue_status = "Yawn"
-                        fatigue_color = (0, 0, 255)
+                        fatigue_color = (0, 165, 255)
 
             # Eseményvezérelt naplózás, csak ha az állapot megváltozik
             if fatigue_status != last_logged_status:
